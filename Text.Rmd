@@ -1,0 +1,1965 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+
+# Importing libraries
+
+knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(tidytext)
+library(FactoMineR)
+library(tidyr)
+library(topicmodels)
+library(qdap)
+library(tm)
+library(wordcloud)
+library(stringr)
+library(textstem)
+library(sentimentr)
+library(lexicon)
+library(data.table)
+library(Hmisc)
+library(FSelector)
+library(caTools)
+library(caret)
+library(gridExtra)
+library(textdata)
+library(udpipe)
+library(cld2)
+library(topicmodels)
+library(textcat)
+library(kableExtra)
+library(factoextra)
+library(LDAvis)
+library(caTools)
+library(purrr)
+library(stm)
+library(quanteda)
+library(wordcloud2)
+library(corpustools)
+library(igraph)
+library(glue)
+library(servr)
+library(lubridate)
+library(AICcmodavg)
+library(hunspell)
+library(textmineR)
+```
+
+
+# Introduction
+
+
+The objective of this assessment is to familiarize with the thorough process of Text Mining: Extraction, Normalisation and Visualisation of insightful features from unstructured data. The assignment is segregated into three different parts:
+
+1.	Building a Corpus and Bag-of-Words model
+2.	Sentiment-Polarity analysis and Feature Engineering
+3.	Topic Modelling
+
+The report is structured to incorporate the required analysis using R, generating insights and visualising the same in industry standard formats. 
+
+# PART A
+
+
+## Building a Corpus and Bag Of Words Model
+
+For building a corpus, Twitter API has been used to scrape tweets related to “Brexit”. BREXIT is the withdrawal of the United Kingdom from the European Union (Wikipedia Contributors, 2018). The motivation for this selection was to examine post-Brexit consequences in the UK and Europe, people’s positive and negative sentiments about it, political, economic and financial crisis. The most recent data has been extracted to speculate if affects of Brexit is still prevalent in the UK. The target variable for this analysis is the “favorite_count” which checks the popularity of a particular tweet. Some of the variables being used from the API are mentioned below.
+
+Furthermore, the corpus is being supported by a metadata containing information about retweets.
+
+![Variables](Data.png)
+
+\pagebreak
+
+## API authentication
+
+Twitter’s Developer portal has been used to create an application for enabling extraction of tweets via API and establishing authentication via R's “rtweet” package. 500K tweets have been scraped for forming the desired corpus.
+
+
+```{r}
+
+# Twitter API authentication
+
+appname <- "TextMineBrexit"
+
+# API key
+key <- "te9fQy6E6xH7mcKZUVuyUEy7u"
+
+# API secret 
+
+secret <- "tmvr7GxApggDqqGJN3rMNfhSWjeKFTFQYP9gpBlm4Bgdvwah08"
+
+access_token<-"192816442-gdXykdd3WxtOGKw56x4YQuCtsjlucJ5eZDPJHCrG"
+
+access_secret<-"ADS04jM6AsxTDgwcIgob0saiE91vbW1Thzq1YxCA66Ski"
+
+# Create token
+
+twitter_token <- create_token(
+  app = appname,
+  consumer_key = key,
+  consumer_secret = secret,
+  access_token = access_token,
+  access_secret = access_secret
+  )
+```
+
+```{r}
+# Search Tweets based on Brexit 
+# Scraping 500K tweets
+
+rstats_tweets <- search_tweets(q = "Brexit",n=500000,retryonratelimit=TRUE)
+```
+
+\pagebreak
+
+
+## Data Pre-processing and Normalization
+
+After scraping the tweets, the necessary steps for data pre-processing and normalization have been applied. The twitter API extracts 90 column variables. However, for the analysis, 13 relevant column variables have been extracted and also, metadata has been created with 8 variables. Tweets following the English language only, have been retrieved for further processing. Tweets containing the tagged names of users do not contribute any valuable information, and hence, such names have been removed from the text.
+
+Post the data cleaning stage, bag-of-words analysis has been conducted. Text Normalization [Removing numbers, white spaces, replacing abbreviations, etc], Text tokenization, Stopword removal and Lemmatization have been performed to standardize the data. This also helped identifying some frequently occurring words such as “Brexit”, “UK”, “EU”, etc, that do not provide any useful insights. Therefore, these were dropped from the dataset.The text was also run through a spell check dictionary using hunspell_check although the results were not very accurate.
+
+Below is a text mining pipeline followed for PART A.
+
+![Text Mining pipeline](pipelines.png)
+
+\pagebreak
+
+```{r pressure}
+
+fwrite(rstats_tweets,"Tweets.csv")
+
+# Checking the top 10 rows
+head(rstats_tweets,10)
+
+# Filtering only required columns out of the total 90 variables
+
+rstats_tweets_f<-rstats_twitter%>%
+  filter(lang=="en")%>%
+  #slice(1:200000)%>%
+  dplyr::select(user_id,status_id,created_at,screen_name,text,source,favorite_count,
+                followers_count,hashtags,favourites_count,location,verified,description)
+
+# Forming Metadata
+rstats_tweets_f_meta<-rstats_twitter%>%
+  filter(lang=="en")%>%
+  dplyr::select(user_id,retweet_count,retweet_user_id,retweet_status_id,retweet_count,
+                retweet_favorite_count,retweet_text,retweet_description)
+
+# Distinct records only
+rstats_tweets_f<-distinct(rstats_tweets_f)
+
+
+```
+
+```{r}
+
+# Encoding and detection of the language
+rstats_tweets_f$text <- iconv(rstats_tweets_f$text)
+rstats_tweets_f$language <- cld2::detect_language(rstats_tweets_f$text)
+
+# Check data to see tweets and their languages
+table(rstats_tweets_f$language)
+
+# Remove other language tweets
+rstats_tweets_f <- rstats_tweets_f %>%
+  filter(language == "en")
+# Recheck
+table(rstats_tweets_f$language)
+
+
+#Removing all tagged people's names from the tweets
+
+rstats_tweets_f$text<-gsub("@\\w+ *", "", rstats_tweets_f$text)
+
+
+
+# Data cleaning steps
+
+rstats_tweets_f$text <- gsub("([a-z])([A-Z])","\\1 \\2",rstats_tweets_f$text)
+rstats_tweets_f$text <- gsub("\\,"," ",rstats_tweets_f$text)
+
+rstats_tweets_f$text<- rstats_tweets_f$text %>%
+  str_squish() %>%
+  rm_url() %>%
+  replace_contraction() %>%
+  replace_word_elongation() %>%
+  removeNumbers()%>%
+  replace_abbreviation()
+```
+
+```{r}
+
+# Adding unique ID
+
+rstats_tweets_f$tweet_id <- 1:nrow(rstats_tweets_f)
+```
+
+```{r}
+
+# Tokenization
+
+tweets_clean <- rstats_tweets_f %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+
+# Lemmatization
+
+tweets_clean$word <- lemmatize_words(tweets_clean$word)
+
+# Removing custom stopwords
+
+my_stopwords <- tibble(word = c("â", "amp", "ðÿ", "itâ", "theyâ","brexit","uk",
+                                "eu"), lexicon = "custom")
+
+tweets_clean<-tweets_clean%>%
+  anti_join(my_stopwords)
+
+# Detecting the language again as some of the non-english words were not 
+# detected in the sentence form
+
+tweets_clean$language <- cld2::detect_language(tweets_clean$word)
+table(tweets_clean$language)
+
+tweets_clean <- tweets_clean %>%
+  filter(language == "en")
+
+# Storing tokenized words and their frequencies
+
+tweet_words <- tweets_clean %>%
+  count(tweet_id,word,sort=TRUE)%>% 
+  ungroup()%>% 
+  rename(count=n)
+
+```
+
+```{r}
+
+# Spell check tokens
+
+correct_spelling <- function(input) {
+  output <- case_when(
+    
+    # Check and (if required) correct spelling
+    !hunspell_check(input, dictionary('en_GB')) ~
+    hunspell_suggest(input, dictionary('en_GB')) %>%
+      # Get first suggestion, or NA if suggestions list is empty
+      map(1, .default = NA) %>%
+      unlist(),
+    TRUE ~ input # if word is correct
+  )
+  # If input incorrectly spelled but no suggestions, return input word
+  ifelse(is.na(output), input, output)
+}
+
+# Get the corrected spelling
+tweets_corrected <- tweet_words %>%
+  mutate(suggestion = correct_spelling(word)) %>%
+  filter(suggestion != word)
+
+tweets_corrected<-tweets_corrected%>%
+  dplyr::select(tweet_id,suggestion)%>%
+  unnest_tokens(word,suggestion)
+
+# Using corrected words
+
+tweets_corrected<-tweets_corrected%>%
+count(tweet_id,word,sort=TRUE)%>% 
+ungroup()%>% 
+rename(count=n)
+```
+
+## Word Importance and Document-Term Matrix creation
+
+Word importance analysis and construction of a DTM has been carried out for Unigrams, Bigrams and Trigrams as below. Considering the text in hand, an n-gram analysis upto Trigrams seemed reasonable. 
+
+
+### Unigram
+
+TF-IDF has been used to evaluate the term frequencies as well as how significant a particular term is across documents. Post this, a Document Term Matrix(DTM) and Document Frequency Matrix(DFM) have been constructed to further inspect the word importance through relevant Bar Charts, Wordclouds and Word associations. It is to be noted that document sparsity has been reduced. 
+
+As per the below graphs, we can comment that the most dominant words, “spokesman”, ”government”, ”question”, ”recession”, etc mostly indicate people’s opinions around Brexit’s political and economical affect.
+
+![Wordcloud using DTM](TF_IDF_Unigram.png)
+
+<br>
+<br>
+
+
+![Wordcloud using DFM](DFM_Unigram.png)
+
+<br>
+<br>
+
+
+
+![Bar Chart for term frequencies](Unigram_Counts.png)
+
+<br>
+<br>
+
+
+
+![Bar Chart for TF-IDF frequencies](Unigram_TFIDF.png)
+
+
+```{r}
+
+# Wordcloud for Unigram prior to TF-IDF
+
+pal = brewer.pal(9,"Blues")
+tweets_corrected %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 50,colors = pal))
+
+# Non-tokenized cleaned text
+tweets_without_stopwords<-tweets_clean%>%
+  group_by(tweet_id)%>% 
+  summarise(text_nostopwords=paste(word,collapse=" "), 
+            totalwords=n())
+
+# TF-IDF
+tweets_tfidf<-tweet_words%>% 
+  bind_tf_idf(word,tweet_id,count)
+
+head(tweets_tfidf)
+```
+
+```{r}
+
+# Document Term Matrix creation
+
+# DTM with count
+tweets_dtm_count<-tweets_tfidf%>%
+  cast_dtm(tweet_id,word,count) 
+
+# DTM with TF_IDF
+tweets_dtm_tfidf<-tweets_tfidf%>%
+  cast_dtm(tweet_id,word,tf_idf)
+
+# Reducing sparsity in the matrices
+tweets_dtm_count_sparse=removeSparseTerms(tweets_dtm_count,0.99) 
+tweets_dtm_count_sparse
+
+tweets_dtm_tfidf_sparse=removeSparseTerms(tweets_dtm_tfidf,0.99) 
+tweets_dtm_tfidf_sparse
+
+# Summing up the word frequencies
+
+s_count<-colSums(as.matrix(tweets_dtm_count_sparse)) 
+s_count<-as.data.frame(s_count) 
+s_count$term<-row.names(s_count) 
+colnames(s_count)<-c("frequency","term") 
+head(s_count)
+
+s_tfidf<-colSums(as.matrix(tweets_dtm_tfidf_sparse)) 
+s_tfidf<-as.data.frame(s_tfidf)
+s_tfidf$document<-row.names(s_tfidf) 
+colnames(s_tfidf)<-c("frequency","document") 
+
+ # Plotting word clouds
+
+
+set.seed(123) 
+wordcloud(s_count$term,s_count$frequency,
+          scale=c(2.5,0.5),
+          0,
+          max.words=200, 
+          colors=brewer.pal(8,"Dark2"))
+          title(sub="Brexi Tweets (Count)")
+
+
+set.seed(123)          
+wordcloud(s_tfidf$document,s_tfidf$frequency,
+          scale=c(2.5,0.5),               
+          0,                      
+          max.words=200               , 
+          colors=brewer.pal(8,"Dark2"))         
+          title(sub="Brexi Tweets (TF_IDF)")
+
+          
+# Word Associations
+findAssocs(tweets_dtm_tfidf_sparse,c("opposition","citizen"), 0.1)
+
+
+```
+
+```{r}
+# Corpus for Document Feature matrix: DFM
+
+tweets_clean_dfm<-rstats_tweets_f%>%
+  dplyr::select(tweet_id,text)%>%
+  inner_join(tweets_clean)%>%
+  dplyr::select(-word)
+
+tweetsCorpus<-quanteda::corpus(tweets_clean_dfm)
+
+summary(tweetsCorpus)
+
+dfmtweets <- dfm(as.character(tweets_dtm_tfidf_sparse), remove = 
+                 c(stopwords("english"),"&",";",":","â","ð","Ÿ","#"), 
+                 remove_punct = TRUE, remove_numbers = TRUE,    
+                 remove_symbol = TRUE, tolower=T)
+
+#Wordcloud
+
+set.seed(111)
+quanteda.textplots::textplot_wordcloud(dfmtweets,max_words = 100, min_size = 1, 
+                                       color = rev(RColorBrewer::brewer.pal(10, "RdBu")))
+
+# Plotting Word frequencies 
+
+s_tfidf %>% 
+  ggplot(aes(frequency,reorder(document,frequency),fill=document))+ 
+  geom_col(show.legend=FALSE)+ 
+  labs(x="TF_IDF",y="Words",title = labs(title = "Dominant Words (Unigrams)"))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#Bar chart plotting word frequencies
+
+tweet_words %>% 
+  group_by(word) %>% 
+  summarise(total =n()) %>% 
+  arrange(desc(total)) %>% 
+  top_n(15)%>%
+  ggplot(aes(x=total,y=reorder(word,total),fill=total))+
+  geom_col(show.legend = FALSE)+
+  labs(title = "Dominant Words (Unigrams)")+
+  xlab("Counts")+
+  ylab("Words")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Bigram
+
+Similarly, DTM and DFM have been created post TF-IDF evaluation. The dominant 2-word combinations again indicate the political tension Brexit has had in the UK. A Bigram network graph has been created by leveraging R’s {igraph} package that shows various word correlations.
+
+![Bar Chart with TFIDF](Bigram_TFIDF.png)
+
+<br>
+<br>
+
+
+![Bigram network graph of word correlations](Bigram_network.png)
+
+```{r}
+# BIGRAM
+
+# Tokenization on already cleaned text
+
+bigram <- tweets_without_stopwords %>%
+  unnest_tokens(word,text_nostopwords, token = "ngrams", n = 2)
+
+bigram_tweet_words<-bigram%>%
+  count(tweet_id,word,sort = TRUE)%>%
+  na.omit()
+
+# TF-IDF
+tweets_tfidf_bigram<-bigram_tweet_words%>% 
+  bind_tf_idf(word,tweet_id,n)
+
+
+# DTM creation
+
+# DTM with count
+tweets_dtm_count_bigram<-tweets_tfidf_bigram%>%
+  cast_dtm(tweet_id,word,n) 
+
+# DTM with TF_IDF
+tweets_dtm_tfidf_bigram<-tweets_tfidf_bigram%>%
+  cast_dtm(tweet_id,word,tf_idf)
+
+# Reducing sparsity in the matrices
+tweets_dtm_count_bigram_sparse=removeSparseTerms(tweets_dtm_count_bigram,0.99) 
+tweets_dtm_count_bigram_sparse
+
+tweets_dtm_tfidf_bigram_sparse=removeSparseTerms(tweets_dtm_tfidf_bigram,0.99) 
+tweets_dtm_tfidf_bigram_sparse
+
+# Summing up the word frequencies
+
+s_count_bigram<-colSums(as.matrix(tweets_dtm_count_bigram_sparse)) 
+s_count_bigram<-as.data.frame(s_count_bigram) 
+s_count_bigram$term<-row.names(s_count_bigram) 
+colnames(s_count_bigram)<-c("frequency","term") 
+head(s_count_bigram)
+
+s_tfidf_bigram<-colSums(as.matrix(tweets_dtm_tfidf_bigram_sparse)) 
+s_tfidf_bigram<-as.data.frame(s_tfidf_bigram)
+s_tfidf_bigram$document<-row.names(s_tfidf_bigram) 
+colnames(s_tfidf_bigram)<-c("frequency","document") 
+
+# Plotting Word frequencies 
+
+s_tfidf_bigram %>% 
+  ggplot(aes(frequency,reorder(document,frequency),fill=document))+ 
+  geom_col(show.legend=FALSE)+ 
+  labs(x="TF_IDF",y="Words",title = labs(title = "Dominant Words (Bigrams)"))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+# Plotting a network graph
+
+bigram %<>% 
+  separate(col = word, into = c('word1', 'word2'), sep = ' ') %>% 
+  filter(! is.na(word1)) %>% 
+  filter(! is.na(word2)) 
+
+bigram_count <- bigram %>% 
+  dplyr::count(word1, word2, sort = TRUE) %>% 
+  dplyr::rename(weight = n)
+
+
+threshold <- 50
+# For visualization purposes we scale by a global factor. 
+ScaleWeight <- function(x, lambda) {
+  x / lambda
+}
+
+network_bigram <-  bigram_count %>%
+  filter(weight > threshold) %>%
+  mutate(weight = ScaleWeight(x = weight, lambda = 2E3)) %>% 
+  graph_from_data_frame(directed = FALSE)
+
+
+
+plot(
+  network_bigram, 
+  vertex.size = 1,
+  vertex.label.color = 'black', 
+  vertex.label.cex = 0.7, 
+  vertex.label.dist = 1,
+  edge.color = 'gray', 
+  main = 'Bigram Count Network', 
+  sub = glue('Weight Threshold: {threshold}'), 
+  alpha = 50
+)
+
+#Bar chart plotting word frequencies
+
+bigram_tweet_words %>% 
+  group_by(word) %>% 
+  summarise(total =n()) %>% 
+  arrange(desc(total)) %>% 
+  top_n(15)%>%
+  ggplot(aes(x=total,y=reorder(word,total),fill=total))+
+  geom_col(show.legend = FALSE)+
+  labs(title = "Dominant Words (Bigrams)")+
+  xlab("Counts")+
+  ylab("Words")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Corpus for Document Feature matrix: DFM
+
+dfmtweets_bigram <- dfm(as.character(bigram_tweet_words), remove = 
+                          c(stopwords("english"),"&",";",":","â","ð","Ÿ","#"), 
+                        remove_punct = TRUE, remove_numbers = TRUE,  
+                        remove_symbol = TRUE, tolower=T)
+
+```
+
+
+
+### Trigram
+
+In our Trigram analysis, other then the very first combination of words, the rest don’t seem to contribute much to the frequency counts. The word combinations also don’t provide much interpretation other than a brief idea of Brexit’s impact on globalization and economic growth. 
+
+![Bar Chart with TFIDF](Trigram_TFIDF.png)
+
+<br>
+<br>
+
+
+![Trigram network graph of word correlations](Trigram_Network.png)
+
+```{r}
+# TRIGRAM
+
+# Tokenization
+
+trigram <- tweets_without_stopwords %>%
+  unnest_tokens(word, text_nostopwords, token = "ngrams", n = 3)
+
+trigram_tweet_words<-trigram%>%
+  count(word,tweet_id,sort = TRUE)%>%
+  na.omit()
+
+# TF-IDF
+tweets_tfidf_trigram<-trigram_tweet_words%>% 
+  bind_tf_idf(word,tweet_id,n)
+
+
+# DTM creation
+
+# DTM with count
+tweets_dtm_count_trigram<-tweets_tfidf_trigram%>%
+  cast_dtm(tweet_id,word,n) 
+
+# DTM with TF_IDF
+tweets_dtm_tfidf_trigram<-tweets_tfidf_trigram%>%
+  cast_dtm(tweet_id,word,tf_idf)
+
+# Reducing sparsity in the matrices
+tweets_dtm_count_trigram_sparse=removeSparseTerms(tweets_dtm_count_trigram,0.99) 
+tweets_dtm_count_bigram_sparse
+
+tweets_dtm_tfidf_trigram_sparse=removeSparseTerms(tweets_dtm_tfidf_trigram,0.99) 
+tweets_dtm_tfidf_trigram_sparse
+
+# Summing up the word frequencies
+
+s_count_trigram<-colSums(as.matrix(tweets_dtm_count_trigram_sparse)) 
+s_count_trigram<-as.data.frame(s_count_trigram) 
+s_count_trigram$term<-row.names(s_count_trigram) 
+colnames(s_count_trigram)<-c("frequency","term") 
+head(s_count_trigram)
+
+s_tfidf_trigram<-colSums(as.matrix(tweets_dtm_tfidf_trigram_sparse)) 
+s_tfidf_trigram<-as.data.frame(s_tfidf_trigram)
+s_tfidf_trigram$document<-row.names(s_tfidf_trigram) 
+colnames(s_tfidf_trigram)<-c("frequency","document") 
+
+# Plotting Word frequencies 
+
+s_count_trigram %>% 
+  ggplot(aes(frequency,reorder(term,frequency),fill=term))+ 
+  geom_col(show.legend=FALSE)+ 
+  labs(x="Counts",y="Words",title = labs(title = "Dominant Words (Trigrams)"))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#Bar chart plotting word frequencies
+
+trigram_tweet_words %>% 
+  group_by(word) %>% 
+  summarise(total =n()) %>% 
+  arrange(desc(total)) %>% 
+  top_n(15)%>%
+  ggplot(aes(x=total,y=reorder(word,total),fill=total))+
+  geom_col(show.legend = FALSE)+
+  labs(title = "Dominant Words (Trigrams)")+
+  xlab("Counts")+
+  ylab("Words")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# NETWORK GRAPH
+
+trigram %<>% 
+  separate(col = word, into = c('word1', 'word2','word3'), sep = ' ') %>% 
+  filter(! is.na(word1)) %>% 
+  filter(! is.na(word2)) %>%
+  filter(! is.na(word3))
+
+trigram_count <- trigram %>% 
+  dplyr::count(word1, word2, word3,sort = TRUE) %>% 
+  dplyr::rename(weight = n)
+
+threshold <- 50
+# For visualization purposes we scale by a global factor. 
+ScaleWeight <- function(x, lambda) {
+  x / lambda
+}
+
+network_trigram <-  trigram_count %>%
+  filter(weight > threshold) %>%
+  mutate(weight = ScaleWeight(x = weight, lambda = 2E3)) %>% 
+  graph_from_data_frame(directed = FALSE)
+
+plot(
+  network_trigram, 
+  vertex.size = 1,
+  vertex.label.color = 'black', 
+  vertex.label.cex = 0.7, 
+  vertex.label.dist = 1,
+  edge.color = 'gray', 
+  main = 'Trigram Count Network', 
+  sub = glue('Weight Threshold: {threshold}'), 
+  alpha = 50
+)
+
+# Corpus for Document Feature matrix: DFM
+dfmtweets_trigram <- dfm(as.character(trigram_tweet_words), remove = 
+                           c(stopwords("english"),"&",";",":","â","ð","Ÿ","#"),
+                         remove_punct = TRUE, remove_numbers = TRUE, 
+                         remove_symbol = TRUE, tolower=T)
+
+```
+
+\pagebreak
+
+
+# PART B
+
+## Sentiment Analysis & Feature Engineering
+
+In this part of the assessment, sentiment analysis or opinion mining has been carried out to understand the public’s positive, negative or neutral emotions from the tweets, with respect to Brexit. Furthermore, features have been extracted from the tweets and regressed alongwith a sentiment dictionary to generate reasonable insights from the data.
+
+### Dictionary Selection
+
+Sentiment dictionaries, namely, Bing, Affin, NRC and Loughran have been used to evaluate their effect on the outcome variable through a Generalized Linear Model (GLM). The dictionary with the least mean square error (5.83) and highest information again (0.8), i.e. Affin, has been chosen for further regression analysis with text derived features.
+
+![Dictionary information gain](IG.png)
+
+```{r}
+# Summary all the regression result and compare
+# Inner Join the dictionaries with all data
+
+# 1. Bing dictionary
+
+
+tweet_favorite<-tweets_clean%>%
+  dplyr::select(tweet_id,favorite_count)
+
+bing_result<-tweet_words %>% 
+  inner_join(get_sentiments("bing")) %>%
+  count(sentiment,tweet_id) %>% 
+  spread(sentiment,n) %>%
+  mutate(bing_liu_sentiment = positive-negative/(positive+negative)) %>%
+  select(tweet_id,bing_liu_sentiment)
+
+
+bing_result <- bing_result%>%
+  left_join(tweet_favorite)
+
+# NRC Dictionary 
+
+nrc_result<-tweet_words %>% 
+  inner_join(get_sentiments("nrc")) %>% 
+  count(sentiment,tweet_id) %>% 
+  spread(sentiment,n)
+
+nrc_result <- nrc_result %>% 
+  left_join(tweet_favorite) %>% 
+  mutate(sentiment_nrc = positive-negative)%>%
+  select(tweet_id,favorite_count,sentiment_nrc)
+
+# Afinn Dictionary
+affin_result<-tweet_words %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(tweet_id) %>% 
+  summarise(sentiment_affin = sum(value)) 
+
+affin_result <- affin_result%>% 
+  left_join(tweet_favorite)
+
+# Loughran Dictionary
+
+loughran_result<-tweet_words %>% 
+  inner_join(get_sentiments("loughran")) %>% 
+  count(sentiment,tweet_id) %>% 
+  spread(sentiment,n) 
+
+loughran_result <- loughran_result %>% 
+  left_join(tweet_favorite) %>% 
+  mutate(sentiment_loughran = positive-negative) %>% 
+  select(tweet_id,favorite_count,sentiment_loughran)
+
+all_sentiments_result <- bing_result %>% 
+  left_join(nrc_result) %>%
+  left_join(affin_result) %>%
+  left_join(loughran_result) %>% 
+  na.omit()
+
+
+# Bing Liu
+model_bing <- lm((favorite_count)~bing_liu_sentiment, 
+             data=all_sentiments_result)
+
+# NRC affection 
+model_nrc <- lm((favorite_count)~sentiment_nrc,
+             data=all_sentiments_result)
+
+#Afinn 
+model_affin <- lm((favorite_count)~sentiment_affin,
+             data=all_sentiments_result) 
+# Loughran
+model_loughran <- lm((favorite_count)~sentiment_loughran, 
+             data=all_sentiments_result)
+
+# Predict
+
+model_bing_pred<-all_sentiments_result %>% 
+  mutate(pred=predict(model_bing))
+
+model_nrc_pred<-all_sentiments_result %>% 
+  mutate(pred=predict(model_nrc))
+
+model_affin_pred<-all_sentiments_result %>% 
+  mutate(pred=predict(model_affin))
+
+model_loughran_pred<-all_sentiments_result %>% 
+  mutate(pred=predict(model_loughran))
+
+# MSE values of all models to select one with the least errors
+
+acc_model_bing<-model_bing_pred %>% 
+  mutate(error=pred - favorite_count, sq.error=error^2)%>% 
+  summarise(mse=mean(sq.error))
+
+acc_model_nrc<-model_nrc_pred %>% 
+  mutate(error=pred - favorite_count, sq.error=error^2)%>% 
+  summarise(mse=mean(sq.error))
+
+acc_model_affin<-model_affin_pred %>% 
+  mutate(error=pred - favorite_count, sq.error=error^2)%>% 
+  summarise(mse=mean(sq.error))
+
+acc_model_loughran<-model_loughran_pred %>% 
+  mutate(error=pred - favorite_count, sq.error=error^2)%>% 
+  summarise(mse=mean(sq.error))
+
+acc_model_all<-rbind(acc_model_bing,acc_model_nrc,acc_model_affin,acc_model_loughran)
+
+stargazer::stargazer(model_bing,model_nrc,model_affin,model_loughran,type = "text")
+
+#Information GAIN
+IG <- information.gain(favorite_count~bing_liu_sentiment + sentiment_nrc + 
+                         sentiment_affin + sentiment_loughran, all_sentiments_result)
+
+IG%>%
+kbl(col.names = c("Dictionary Importance")) %>%
+  kable_styling(full_width = T,bootstrap_options = 
+                  c("striped", "hover", "condensed", "responsive"),position = "center")
+
+```
+
+ \pagebreak
+ 
+## Feature Evaluation
+
+Various features were extracted from the text to inspect their significance in predicting the target variable. The data has been partitioned into Train:Test (70:30) samples and GLM regression models have been executed for each derived feature. 
+
+**Length of tweets**
+
+Length of the tweets didn't seem to have much significance on predicting the popularity of a tweet which seems plausible due to the limitation of maximum allowed characters on tweets.
+
+**Repeated words**
+
+Similarly, twitter users don't seem to be using repeating words in their tweets as this feature didn't have much predictive power on the favorite counts.
+
+**Retweet counts**
+
+Retweet counts were evaluated based on the tweets posted and the results do indicate that a popular tweet is most likely to be retweeted more.
+
+**Follower counts**
+
+Twitter users with more favorite counts on their tweets also tend to have higher followers on their account.
+
+**User gender**
+
+The gender of a twitter user was extracted from the screen name. Although the variable did have a significant p-value, it didnt seem to have a strong predictive power on the favorite counts.
+
+**Verified users**
+
+A regression model was also run to determine if tweets posted by verified users have higher favorites and the results does seem to be significant, thereby reckoning an influencer's view is more accounted for.
+
+**Negative sentiment associated with mention of the Prime Minister's name**
+
+It was also interesting to check if the public had any negative sentiments associated with the current ruling party or the prime minister to be specific. However, no such importance was found.
+
+
+
+```{r}
+
+# Choose random samples
+set.seed(123)
+
+# Detecting gender from the screen name
+
+rstats_tweets_f$name <- str_extract(str_to_lower(rstats_tweets_f$screen_name),"[a-z]+")
+gender::gender(rstats_tweets_f$name) %>% 
+        select(name = name,gender) %>% 
+        unique(.)-> results_gender
+
+rstats_tweets_f <- rstats_tweets_f %>% 
+  left_join(results_gender)
+
+tweets_clean_balance<-tweets_clean%>%
+  left_join(rstats_tweets_f_meta)%>%
+  left_join(rstats_tweets_f)%>%
+  select(tweet_id,favorite_count,text,description,verified,word,retweet_count,
+         retweet_favorite_count,retweet_description,followers_count,gender)
+
+# Split data into training and test data
+partition = sample.split(tweets_clean_balance$favorite_count, SplitRatio = 0.7)
+training = subset(tweets_clean_balance, partition == TRUE)
+testing = subset(tweets_clean_balance, partition == FALSE)
+```
+
+
+```{r}
+# Tweet length
+
+num_cleaned_words <- training %>%
+  group_by(tweet_id, favorite_count) %>%
+  summarise(num = n())
+
+num_cleaned_test <- testing %>%
+  group_by(tweet_id, favorite_count) %>%
+  summarise(num = n())
+
+# Check the regression result
+
+num_cleaned_impact <- glm(favorite_count ~num , data = num_cleaned_words)
+
+summary(num_cleaned_impact)
+
+# Predict the class probabilities of the test data
+num_cleaned_prob <- predict(num_cleaned_impact, num_cleaned_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+num_cleaned_class <- ifelse(num_cleaned_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+num_cleaned_class <- as.factor(num_cleaned_class)
+# Find the percentage of correct predictions
+accuracy_num_cleaned <- length(which(num_cleaned_class == 
+                                    num_cleaned_test$favorite_count))/nrow(num_cleaned_test)
+accuracy_num_cleaned
+
+```
+
+```{r}
+# create word count table and arrange 
+
+repeat_word_counts <- training %>%
+  count(tweet_id,favorite_count, word, sort=TRUE) %>%
+  ungroup() %>%
+  rename(count=n)%>%
+  arrange(desc(count))
+
+repeat_word_test <- testing %>%
+  count(tweet_id,favorite_count, word, sort=TRUE) %>%
+  ungroup() %>%
+  rename(count=n)%>%
+  arrange(desc(count))
+
+# Check the regression result
+
+repeat_word_impact <- glm(favorite_count ~count , data = repeat_word_counts)
+
+summary(repeat_word_impact)
+
+# Predict the class probabilities of the test data
+repeat_word_prob <- predict(repeat_word_impact, repeat_word_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+repeat_word_class <- ifelse(repeat_word_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+repeat_word_class <- as.factor(repeat_word_class)
+# Find the percentage of correct predictions
+accuracy_repeat_word <- length(which(repeat_word_class == 
+                        repeat_word_test$favorite_count))/nrow(repeat_word_test)
+accuracy_repeat_word
+
+```
+```{r}
+retweet_word_counts <- training %>%
+  group_by(tweet_id)%>%
+  select(favorite_count,retweet_count)
+
+retweet_word_test <- testing %>%
+  group_by(tweet_id)%>%
+  select(favorite_count,retweet_count)
+
+
+# Check the regression result
+
+retweet_word_impact <- glm(favorite_count ~retweet_count , data = retweet_word_counts)
+
+summary(retweet_word_impact)
+
+# Predict the class probabilities of the test data
+retweet_word_prob <- predict(retweet_word_impact, retweet_word_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+retweet_word_class <- ifelse(retweet_word_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+retweet_word_class <- as.factor(retweet_word_class)
+# Find the percentage of correct predictions
+accuracy_retweet_word <- length(which(retweet_word_class == 
+                        retweet_word_test$favorite_count))/nrow(retweet_word_test)
+accuracy_retweet_word
+```
+
+```{r}
+
+# Train data for follower counts
+
+follower_word_counts <- training %>%
+  group_by(tweet_id)%>%
+  select(favorite_count,followers_count)
+
+# Create test dataset
+
+follower_word_test <- testing %>%
+  group_by(tweet_id)%>%
+  select(favorite_count,followers_count)
+
+# Check the regression result
+
+follower_word_impact <- glm(favorite_count ~followers_count , data = follower_word_counts)
+
+summary(follower_word_impact)
+
+# Predict the class probabilities of the test data
+follower_word_prob <- predict(follower_word_impact, follower_word_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+follower_word_class <- ifelse(follower_word_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+follower_word_class <- as.factor(follower_word_class)
+# Find the percentage of correct predictions
+accuracy_follower_word <- length(which(follower_word_class == 
+                          follower_word_test$favorite_count))/nrow(follower_word_test)
+accuracy_follower_word
+```
+
+```{r}
+
+#Train data for verified users
+
+verified_users <- training %>%
+  group_by(tweet_id)%>%
+  select(favorite_count,verified)
+
+# Create test data
+
+verified_users_test <- testing %>%
+  group_by(tweet_id)%>%
+  select(favorite_count,verified)
+
+# Check the regression result
+
+verified_users_impact <- glm(favorite_count ~verified , data = verified_users)
+
+summary(verified_users_impact)
+
+# Predict the class probabilities of the test data
+verified_users_prob <- predict(verified_users_impact, verified_users_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+verified_users_class <- ifelse(verified_users_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+verified_users_class <- as.factor(verified_users_class)
+# Find the percentage of correct predictions
+accuracy_verified_users <- length(which(verified_users_class == 
+                           verified_users_test$favorite_count))/nrow(verified_users_test)
+accuracy_verified_users
+
+```
+
+```{r}
+
+# Mention of PM name with negative sentiment
+
+pm_name<-training%>%
+  select(tweet_id,favorite_count,word)%>%
+  mutate(present=str_detect(word,"boris|johnson|pm|prime minister"))%>%
+  left_join(bing_dictionary)%>%
+  mutate(f_sentiment=if_else(sentiment=="negative","1","0") )%>%
+  filter(present==TRUE)
+
+pm_name_test<-testing%>%
+  select(tweet_id,favorite_count,word)%>%
+  mutate(present=str_detect(word,"boris|johnson|pm|prime minister"))%>%
+  left_join(bing_dictionary)%>%
+  mutate(f_sentiment=if_else(sentiment=="negative","1","0") )%>%
+  filter(present==TRUE)
+
+# Check the regression result
+
+pm_name_impact <- glm(favorite_count ~sentiment , data = pm_name)
+
+summary(pm_name_impact)
+
+# Predict the class probabilities of the test data
+pm_name_prob <- predict(pm_name_impact, pm_name_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+pm_name_class <- ifelse(pm_name_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+pm_name_class <- as.factor(pm_name_class)
+# Find the percentage of correct predictions
+accuracy_pm_name <- length(which(pm_name_class == pm_name_test$favorite_count))/nrow(pm_name_test)
+accuracy_pm_name
+  
+```
+
+```{r}
+# Detect gender of the user
+
+training$gender<-as.factor(training$gender)
+levels(training$gender)
+testing$gender<-as.factor(testing$gender)
+
+gender_train <- training %>%
+  group_by(tweet_id, gender,favorite_count)
+
+gender_test <- testing %>%
+  group_by(tweet_id,gender, favorite_count) 
+
+# Check the regression result
+
+gender_impact <- glm(favorite_count ~gender , data = gender_train)
+
+summary(gender_impact)
+
+# Predict the class probabilities of the test data
+gender_prob <- predict(gender_impact, gender_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+gender_class <- ifelse(gender_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+gender_class <- as.factor(gender_class)
+# Find the percentage of correct predictions
+accuracy_gender<- length(which(gender_class == 
+                                    gender_test$favorite_count))/nrow(gender_test)
+accuracy_gender
+
+
+```
+
+```{r}
+
+# Afinn Dictionary sentiment
+
+affin_result_sentiment_train<-training %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(tweet_id) %>% 
+  summarise(sentiment_affin = sum(value)) 
+
+affin_result_sentiment_train<-affin_result_sentiment_train%>%
+  left_join(tweet_favorite)
+
+# Test dataset
+
+affin_result_sentiment_test<-testing %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(tweet_id) %>% 
+  summarise(sentiment_affin = sum(value)) 
+
+affin_result_sentiment_test<-affin_result_sentiment_test%>%
+  left_join(tweet_favorite)
+
+affin_impact <- glm(favorite_count ~sentiment_affin , data = affin_result_sentiment_train)
+
+summary(affin_impact)
+
+# Predict the class probabilities of the test data
+affin_prob <- predict(affin_impact, affin_result_sentiment_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+affin_class <- ifelse(affin_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+affin_class <- as.factor(affin_class)
+# Find the percentage of correct predictions
+accuracy_affin <- length(which(affin_class == 
+                 affin_result_sentiment_test$favorite_count))/nrow(affin_result_sentiment_test)
+accuracy_affin
+
+```
+
+
+
+Finally, the text was analyzed for Readability, Formality and Vocabulary metrics (such as: Manhattan distance, Cosine similarity).
+All the significant features derived from text and metadata were then combined into one prediction model alongwith the selected sentiment dictionary, for analyzing its accuracy on the unseen test data. The accuracy for each feature was examined prior to this through regression models.
+
+The final combined model provided a decent accuracy of **55.6%**.
+
+\pagebreak
+
+```{r}
+# Get variable
+# Check if readability would influence favorite counts'
+
+tweets_readability <- training %>% 
+  dplyr::select(tweet_id,description,favorite_count) %>% 
+  unique(.)%>%
+  na.omit()
+
+readability_all <- data.frame()
+
+# Use for loop get all readability information 
+for(i in 1:nrow(tweets_readability)){
+  
+  readability_h <- data.frame() 
+  
+  this_text <- iconv(tweets_readability$description[i])
+  this_text <- removeNumbers(this_text)
+  this_text <- removePunctuation(this_text)
+
+  tryCatch(readability_h <- flesch_kincaid(this_text),error=function(e){
+    cat("Error parsing")
+  })
+    
+  if(!is.null(readability_h$Readability)){
+  
+     readability_h <- readability_h$Readability
+     readability_h$tweet_id <- tweets_readability$tweet_id[i]
+     readability_all <- bind_rows(readability_all,readability_h) 
+   }
+  
+  print(i)
+}
+
+
+all_tweets_readability <- tweets_readability %>% 
+  left_join(readability_all)
+
+
+# Check Formality of text
+
+formality <- qdap::formality(tweets_clean_balance$text,tweets_clean_balance$tweet_id)
+
+formality$formality %>% 
+  select(tweet_id,formality) -> formality_calc
+
+formality_calc$tweet_id <- as.numeric(formality_calc$tweet_id)
+
+# Joining back to the data to be partitioned
+
+tweets_clean_balance %>% left_join(formality_calc) -> tweets_clean_balance
+
+# Create regression models
+
+
+model1_read <- lm(all_tweets_readability$favorite_count~all_tweets_readability$word.count)
+model2_read <- lm(all_tweets_readability$favorite_count~all_tweets_readability$syllable.count)
+model3_read <- lm(all_tweets_readability$favorite_count~all_tweets_readability$FK_grd.lvl)
+model4_read <- lm(all_tweets_readability$favorite_count~all_tweets_readability$FK_read.ease)
+
+stargazer::stargazer(model1_read,model2_read,model3_read,model4_read,type = "text")
+
+
+
+```
+
+
+```{r}
+# Checking the predictive power after the usage of valence shifters  (handling negation, amplifiers)
+
+tweet_sentence <- get_sentences(tweets_without_stopwords$text_nostopwords)
+
+# Shifter with negation and amplifier
+tweets_without_stopwords$sentiment_valence_shifter<- sentiment(tweet_sentence, 
+                                                     amplifier.weight = 0.8, n.before = 10,
+                                                     n.after = 10)$sentiment
+
+
+# Without valence shifters
+
+diff_each_tweet <- tweets_without_stopwords %>%
+  dplyr::select(favorite_count, tweet_id, sentiment_valence_shifter) %>%
+  inner_join(dplyr::select(affin_result, tweet_id, sentiment_affin))
+
+# Compare words with and without valence
+
+diff_each_val <- diff_each_tweet %>%
+ # group_by() %>%
+  summarise(total_before = sum(sentiment_affin), total_after = sum(sentiment_valence_shifter)) %>%
+  pivot_longer(c(total_before, total_after), names_to = "bef_aft", values_to = "total")
+
+# Plot in the graph
+
+plot_sentiment_diff <- ggplot(diff_each_val, aes(total, fill = bef_aft)) + 
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~bef_aft, nrow = 2) + 
+  coord_flip()
+
+```
+
+
+```{r}
+# Combine all train data
+
+prediction <- num_cleaned_words[,c("tweet_id", "favorite_count", "num")] %>%
+  inner_join(repeat_word_counts[,c("tweet_id", "count")]) %>%
+  distinct() %>%
+  inner_join(retweet_word_counts[,c("tweet_id", "retweet_count")]) %>%
+  distinct() %>%
+  inner_join(follower_word_counts[, c("tweet_id", "followers_count")]) %>%
+  distinct() %>%
+  inner_join(verified_users[,c("tweet_id", "verified")]) %>%
+  distinct()%>%
+  #inner_join(pm_name[,c("tweet_id", "sentiment","present")]) %>%
+  #distinct()%>%
+  inner_join(affin_result_sentiment_train[,c("tweet_id","sentiment_affin")])%>%
+  distinct()%>%
+  inner_join(gender_train[,c("tweet_id","gender")])%>%
+  distinct()%>%
+  inner_join(all_tweets_readability[,c("tweet_id","FK.grd.lvl")])%>%
+  distinct()
+
+# Construct the prediction model
+prediction_model <- glm(favorite_count~num + count + sentiment_affin + retweet_count + 
+                      followers_count + verified+gender+FK.grd.lvl, prediction, family = "gaussian")
+
+summary(prediction_model)
+
+
+```
+
+```{r}
+final_test <- num_cleaned_test[,c("tweet_id", "favorite_count", "num")] %>%
+  inner_join(repeat_words_test[,c("tweet_id", "count")]) %>%
+  distinct() %>%
+  inner_join(retweet_word_test[,c("tweet_id", "retweet_count")]) %>%
+  distinct() %>%
+  inner_join(follower_word_test[, c("tweet_id", "followers_count")]) %>%
+  distinct() %>%
+  inner_join(verified_users_test[,c("tweet_id", "verified")]) %>%
+  distinct()%>%
+  #inner_join(pm_name_test[,c("tweet_id", "sentiment","present")]) %>%
+  #distinct()%>%
+  inner_join(affin_result_sentiment_test[,c("tweet_id", "sentiment_affin")]) %>%
+  distinct()%>%
+  inner_join(gender_test[,c("tweet_id","gender")])%>%
+  distinct()
+
+
+final_prob <- predict(prediction_model, final_test, type="response")
+
+# Predict the class - * Prob has been aligned as 0.5 for all the models
+final_class <- ifelse(final_prob >= 0.5, "1", "0")
+# Save the predictions as factor variables
+final_class <- as.factor(final_class)
+# Find the percentage of correct predictions
+accuracy_final <- length(which(final_class == final_test$favorite_count))/nrow(final_test)
+accuracy_final
+
+
+```
+
+```{r}
+sink("reg_result1.html")
+OR<-function(x) exp(x) 
+stargazer::stargazer(num_cleaned_impact,repeat_word_impact,retweet_impact,
+                     follower_impact,verified_users_impact,pm_name_impact,affin_impact, model3_read,
+                     apply.coef= OR,
+                     title="Feature selection Results",
+                     type="html",
+                     float.env ="sidewaystable",
+                     single.row=FALSE,
+                     report=("vc*p")
+
+)
+```
+
+
+
+
+\pagebreak
+
+# PART C
+
+## Topic Modelling 
+
+The final step of our textural analysis is Topic Modelling, using both supervised and unsupervised Machine Learning approach to identify the prevalence of topics over time across the document corpus.
+
+
+### Parts Of Speech Tagging (POS)
+
+Loading language models for identifying parts of speech, named entities, Nouns, Adjectives or Adverbs in the given context of the text.
+
+
+```{r}
+
+# Extracting timestamps from the created_at variable
+
+rstats_tweets_f$time<-str_extract(rstats_tweets_f$created_at, "[0-9]{2}:[0-9]{2}:[0-9]{2}")
+
+#Preparing dataset for stm 
+
+data_for_stm <- rstats_tweets_f%>%
+  inner_join(rstats_tweets_f_meta)%>%
+  filter(language=="english")%>%
+  rename(documents=text)%>%
+  select(tweet_id,documents, favorite_count,followers_count,time,verified)%>%
+  group_by(tweet_id)%>%
+  na.omit()
+
+# Keep only distinct rows
+data_for_stm<-distinct(data_for_stm)
+
+
+```
+
+```{r}
+
+# Loading language models
+
+language <- udpipe_download_model(language="english",overwrite = F)
+ud_model <- udpipe_load_model("english-ewt-ud-2.5-191206.udpipe")
+
+```
+
+```{r}
+# Parts of Speech Tagging
+
+postagged<-udpipe_annotate(
+  ud_model, 
+  data_for_stm$documents, 
+  parallel.cores=8, 
+  trace=1000)
+
+postagged<-as.data.frame(postagged)
+fwrite(postagged,"POS.csv")
+```
+
+```{r}
+lematized<-postagged_final%>%
+  filter(upos %in% c("NOUN", "ADJ", "ADV"))%>%
+  dplyr::select(doc_id,lemma)%>%
+  group_by(doc_id)%>%
+  summarise(documents_pos_tagged=paste(lemma,collapse=" "))
+
+data_for_stm<-data_for_stm%>%
+  mutate(doc_id=paste0("doc",row_number()))
+
+data_for_stm<-data_for_stm%>%
+  left_join(lematized)%>%
+  na.omit()
+```
+
+### Search for the optimal number of Topics, Kappa (K) 
+
+The next vital step is to perform a heuristic search for finding the optimal number of topics with respect to the document corpus. One can make a choice of the required value of K looking at all the diagnostics (held-out likelihood, semantic coherence, residuals and exclusivity). For this particular assessment, a trade off between semantic coherence and exclusivity is acting as a deciding factor for Kappa selection. As per the plots below, it is observed that k=7 is the most ideal trade-off, having reasonable diagnostic values for residuals and held-out likelihood as well. Hence, optimal number of topics has been chosen as 7.
+
+
+![Diagnostic values for Kappa selection](SearchK.png)
+
+
+```{r}
+# searching for optimal number of topics
+
+numtopics <- searchK(out$documents,
+                     out$vocab,
+                     K=seq(from=4,to=12,by=1),
+                     M=12)
+
+plot(numtopics)
+
+# Analyzing Semantic coherence vs Exclusivity
+kappa_result <- as.data.frame(numtopics[1])
+kappa_result <- kappa_result %>%
+  rename("K" = "results.K",  "exclusivity" = "results.exclus",  "semantic_coherence" = "results.semcoh")
+
+
+kappa_result %>%
+  dplyr::select(K, exclusivity, semantic_coherence) %>%
+  filter(K %in% c(4:12)) %>%
+  unnest() %>%
+  mutate(K = as.factor(K)) %>%
+  ggplot(aes(semantic_coherence, exclusivity, color = K)) +
+  geom_point(size = 6, alpha = 0.7) +
+  labs(x = "Semantic coherence",
+       y = "Exclusivity",
+       title = "Exclusivity vs Semantic Coherence")+
+   theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+![Exclusivity vs Semantic Coherence](Cohe_graph.png)
+
+
+### Structural Topic Modelling (STM)
+
+Prior to building an STM for document clustering, textProcessor() function has been run to perform text pre-processing, thereby removing punctuation, stop words, numbers and stemming each word. Only the words which appear more than 1% in the document corpus have been retained. STM model object is then executed using k=7, LDA specialization and using both favorite_count & time_month as the prevalence parameters.
+
+```{r}
+# Text Processing
+processed<-textProcessor(data_for_stm$documents_pos_tagged,
+                         metadata=data_for_stm,
+                         customstopwords=c("â", "amp", "ðÿ", "itâ", "theyâ","brexit",
+                                           "uk","eu","&",";",":","â","ð","Ÿ","#"),
+                         stem=F)
+```
+
+
+```{r}
+
+# Retain words that appear more than 1% in the document corpus
+
+threshold<-round(1/100*length(processed$documents),0)
+
+# Prepping documents
+out<-prepDocuments(processed$documents, 
+                   processed$vocab, 
+                   processed$meta, 
+                   lower.thresh=threshold)
+```
+
+```{r}
+
+# STM model building
+
+# Extracting hourly data
+data_for_stm$time<-as.POSIXct(data_for_stm$time, format="%H:%M:%S")
+data_for_stm$time_month<-hour(data_for_stm$time)
+data_for_stm$time_month<-as.numeric(data_for_stm$time_month)
+
+
+tweetfit <- stm(documents = out$documents, 
+                 vocab = out$vocab, 
+                 K = 7, 
+                 prevalence =~ favorite_count+time_month, 
+                # max.em.its = 75, 
+                 data = out$meta, 
+                 reportevery=10, 
+                 #gamma.prior = "L1", 
+                 sigma.prior = 0.7, 
+                 init.type = "LDA")
+
+# Model summary
+tweetfit_summary<-summary(tweetfit)
+
+# Topic proportions across documents
+tweetfit_proportions <- colMeans(tweetfit$theta)
+
+# Label the topics
+
+tweetfit_labels<-c("Future expected consequences of Brexit","Economic crisis",
+                   "Impact on Exports","Probable impact on future party elections",
+                   "Impact on Irish citizens","How it has impacted and costed recent events",
+                   "Influence on Energy prices")
+```
+
+\pagebreak
+
+### Topic Analysis
+
+The following graphs explore various topic features and are visualized accordingly.
+
+#### Topic Proportions
+<br>
+
+The topic summary gives an overview of the most probable words in each topic as well as the FREX (Frequent and Exclusive) ones. Topic labels have been identified based on these characteristics of the words. The topmost topics from the corpus indicate that even after 2 years post Brexit, people are still interested in discussing its impact on Irish citizens, probable impact on the future elections and also various costs generated. Practically speaking, it does make sense of seeing these topics to be prevalent, for example: Brexit’s impact on Ireland has been indeed talked about a lot, as Ireland is the only European nation that can still continue with the same rights in Britain due to their Common Travel Area Agreement.
+
+It is also worth analysing if the public opinions differ across verified and non-verified twitter users. The topics being talked about changes slightly across both type of users.
+
+
+![Topic Proportions](Topic_Prop.png)
+
+
+![Top Topics](Top_topics.png)
+
+```{r}
+# Table for extracting the topic proportion and FREX words from the summary
+
+table_towrite_labels <- data.frame()
+for(i in 1:length(tweetfit_summary$topicnums)){
+
+   row_here <- tibble(topicnum= tweetfit_summary$topicnums[i],
+                      topic_label = tweetfit_labels[i],
+                      proportion = 100*round(tweetfit_proportions[i],4),
+                     frex_words = paste(tweetfit_summary$prob[i,1:7],
+                                        collapse = ", "))
+   table_towrite_labels <- rbind(row_here,table_towrite_labels)
+}
+
+table_towrite_labels %>% 
+  arrange(topicnum)%>%
+  kbl(col.names = c("Topic_Number","Topic_Label","Proportion","Frequent & Exclusive Words")) %>%
+  kable_styling(full_width = T,bootstrap_options = c("striped", "hover", "condensed", 
+                                                     "responsive"),position = "center")%>%
+  kable_paper("hover")
+```
+
+```{r}
+# Plotting topic summary
+# Topic labels are changed to generic for better readability
+
+plot(tweetfit)
+convergence_theta <- as.data.frame(tweetfit$theta) 
+colnames(convergence_theta)<-paste0("topic_",1:7)
+```
+
+
+![Verified vs Non-verified users](verified.png)
+
+\pagebreak
+
+```{r}
+
+# Check topic proportions across verified vs non-verified twitter users
+
+this_stm_object <- tweetfit$theta
+colnames(this_stm_object) <- paste0("topic_",1:7)
+
+causal_topic_df <- cbind(out$meta,this_stm_object)
+
+Topics_by_score<-causal_topic_df%>%
+  pivot_longer(cols = starts_with("topic"),names_to = "Topics",values_to = "Proportions")
+
+Topics_by_score$Topics<-as.factor(Topics_by_score$Topics)
+
+Topics_by_score%>%
+  group_by(verified,Topics)%>%
+  summarise(m=Proportions/69091)%>%
+  ggplot(aes(x=m, y=reorder_within(Topics,m,verified), fill=factor(verified)))+
+  geom_col(show.legend = FALSE)+
+  facet_wrap(~verified,scales="free")+
+  labs(title = "Topic Proportions for verified and non-verified users")+
+  xlab("Proportion")+
+  ylab("Topics")
+```
+
+
+#### Beta and Gamma matrix for Topics
+
+
+The Beta matrix gives an overview of the word probabilities for each topic, whereas the gamma matrix examines the document probabilities across topics. For each topic, wordcloud has been constructed to visualise the dominant words. The topics don't have strong correlations.
+
+Principle Component Analysis (PCA) variables factor map represents the topic’s contributions to the dimensions. From the values obtained, it can be observed that Topic_1 and Topic_7 contribute the most to the first two dimensions, respectively.
+
+
+![Word-Topic Probabilities](Topic_Probabilities.png)
+
+```{r}
+
+# Wordclouds for each topic showing dominant words
+set.seed(111)
+pal = brewer.pal(9,"Blues")
+stm::cloud(tweetfit,topic = 1, max.words = 40, colors=pal)
+stm::cloud(tweetfit,topic = 2, max.words = 40, colors=pal)
+stm::cloud(tweetfit,topic = 3, max.words = 40, colors=pal)
+stm::cloud(tweetfit,topic = 4, max.words = 40, colors=pal)
+stm::cloud(tweetfit,topic = 5, max.words = 40, colors=pal)
+stm::cloud(tweetfit,topic = 6, max.words = 40, colors=pal)
+stm::cloud(tweetfit,topic = 7, max.words = 40, colors=pal)
+```
+
+```{r}
+
+# Constructing the Beta matrix for per-topic per-word probabilities
+
+td_beta_matrix<-tidy(tweetfit)
+td_beta_matrix
+
+td_beta_matrix %>%
+    group_by(topic) %>%
+    slice_max(beta,n=10) %>%
+    ungroup() %>%
+    arrange(topic,-beta)%>%
+    mutate(term = reorder_within(term, beta, topic))%>%
+    ggplot(aes(beta,term,fill=factor(topic))) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~ topic, scales = "free") +
+    scale_y_reordered()+
+    xlab("Percentage contribution")+
+    ylab("Words in Topics")+
+    labs(title = "Topic-Word Probabilities")+
+    theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+![Greatest differences in words between the top 2 Topics](Word_diff.png)
+
+
+```{r}
+
+# Checking greatest differences in words between the top two topics
+
+beta_wide <- td_beta_matrix %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  pivot_wider(names_from = topic, values_from = beta) %>% 
+  filter(topic1 > .001 | topic2 > .001) %>%
+  mutate(log_ratio = log2(topic2 / topic1))
+
+beta_wide%>%
+dplyr::select(term,topic4,topic5,log_ratio)%>%
+mutate(differ = reorder(term,log_ratio))%>%
+slice_max(term,n=30)%>%
+ggplot(aes(x=log_ratio,y=differ))+
+geom_col()+
+xlab("Log ratio difference")+
+ylab("Terms")+
+labs(title = "Greatest differences in words between the top two topics")
+
+```
+
+![Topic Correlation](Topic_corr.png)
+
+![Topic contributions across dimensions](Variables.png)
+
+![Topic Contribution values across all dimensions](Contribution.png)
+
+
+![Principle Component Analysis (PCA)](PCA.png)
+
+
+
+
+
+```{r}
+
+# Constructing gamma matrix for per-topic per-document probabilities
+
+topic_labels<-paste0("Topic_",1:7)
+gamma_topics<-tidy(tweetfit,matrix="gamma")
+
+gamma_topics<-gamma_topics%>% 
+  pivot_wider(names_from=topic,values_from=gamma)
+
+colnames(gamma_topics)<-c("document",topic_labels)
+
+rownames(gamma_topics)<-gamma_topics$document
+gamma_topics$document <- NULL
+
+
+# Correlation between topics
+corrplot::corrplot(cor(gamma_topics))
+
+
+# Principle Component Analysis
+
+pcah <- FactoMineR::PCA(gamma_topics,graph = FALSE) 
+
+# Checking contribution of variables
+
+get_pca_var(pcah)->v
+v$contrib
+corrplot::corrplot(v$contrib,is.corr = FALSE)
+
+factoextra::fviz_pca_var(pcah,col.var = "contrib",repel = TRUE,legend.title="Contribution")
+```
+
+### Semantic Coherence
+
+Semantic coherence is evaluated to identify how easily interpretable the topics are. The following model measures the similarity among the top 10 words of each topic. As per the scores, Topic_7 which talk about Influence on Energy crisis seem to be the most semantically coherent.
+
+
+```{r}
+# Checking semantic coherence
+coherence<-semanticCoherence(tweetfit,documents = out$documents,M=10)
+
+print(coherence)
+```
+
+![Semantic coherence values](coherence.png)
+
+\pagebreak
+
+### Estimate Effects
+
+Topic prevalence is evaluated across time dimension as well as its variation with tweet popularity. 
+Topic prevalence sees a steep increase for "Economic Crisis" and steep decrease for “Probable impact on future elections” over a 24-hour timeframe.
+
+
+**Topic estimates with Popularity (favorite_count)**
+
+
+
+![](topic_1_fav.png)
+
+![](topic2_fav.png)
+
+![](topic_3_fav.png)
+
+![](topic_4_fav.png)
+
+![](topic_5_fav.png)
+
+![](topic_6_fav.png)
+
+![](topic_7_fav.png)
+
+\pagebreak
+
+**Topic prevalence with time (hourly data)**
+
+
+
+![](Topic_1_time.png) 
+
+![](topic_2_time.png)
+
+![](Topic_3_time.png) 
+
+![](topic_4_time.png)
+
+![](Topic_5_time.png) 
+
+![](topic_6_time.png)
+
+![](Topic_7_time.png) 
+
+
+```{r}
+# Estimating effects
+
+
+effects <- estimateEffect(~favorite_count+time_month,
+                          stmobj = tweetfit,
+                          metadata = out$meta)
+
+
+# Effects of favrotie_count with topics
+
+for(i in 1:length(tweetfit_labels)){
+plot(effects, covariate = "favorite_count",
+     topics = i,
+     model = tweetfit, method = "continuous",
+     # For this plotting we get the uper quantile
+     # and low quantile of the counts
+     xlab = "Popularity",
+     main = tweetfit_labels[i],
+     printlegend = FALSE,
+     custom.labels =tweetfit_labels[i],
+     labeltype = "custom")
+}
+
+# Check prevalence of topics with time
+
+for(i in 1:length(tweetfit_labels)){
+plot(effects, covariate = "time_month",
+     topics = i,
+     model = tweetfit, method = "continuous",
+     # For this plotting we get the uper quantile
+     # and low quantile of the time
+     xlab = "Hourly time data",
+     xlim = c(5,13),
+     main = tweetfit_labels[i],
+     printlegend = FALSE,
+     custom.labels =tweetfit_labels[i],
+     labeltype = "custom")
+}
+
+```
+
+
+### Supervised Topic Modelling approach
+
+Supervised machine learning approach involves regressing the topic thetas obtained against the target variable. AIC values have been taken into account to compare different models and suggest the best fit. From the analysis below, Topic_3 (Impact on Exports) and the model with all topics give good significant scores as well as have lower AIC values, thereby explaining the greatest amount of variation in the data.
+
+![Regression Statistics](Stargazer.png)
+<br>
+
+```{r}
+
+regress<-causal_topic_df %>% 
+  group_by(tweet_id) %>% 
+  summarise(mtopic1=mean(topic_1),
+            mtopic2 = mean(topic_2),
+            mtopic3 = mean(topic_3),
+            mtopic4 = mean(topic_4),
+            mtopic5 = mean(topic_5),
+            mtopic6 = mean(topic_6),
+            mtopic7 = mean(topic_7))
+
+regress<-regress%>%
+  left_join(tweet_favorite)%>%
+  na.omit()
+
+# Effect of topics on the outcome variable
+topic1_model<-lm(favorite_count~mtopic1, data = regress)
+topic2_model<-lm(favorite_count~mtopic2, data = regress)
+topic3_model<-lm(favorite_count~mtopic3, data = regress)
+topic4_model<-lm(favorite_count~mtopic4, data = regress)
+topic5_model<-lm(favorite_count~mtopic5, data = regress)
+topic6_model<-lm(favorite_count~mtopic6, data = regress)
+topic7_model<-lm(favorite_count~mtopic7, data = regress)
+topic_all<-lm(favorite_count~mtopic1+mtopic2+mtopic3+mtopic4+mtopic5+mtopic6+mtopic7,data = regress)
+
+# Checking model summaries
+
+summary(topic1_model)
+summary(topic2_model)
+summary(topic3_model)
+summary(topic4_model)
+summary(topic5_model)
+summary(topic6_model)
+summary(topic7_model)
+summary(topic_all)
+
+# Visualizing all the regression models
+
+sink("reg_result.html")
+OR<-function(x) exp(x) 
+stargazer::stargazer(topic1_model,topic2_model,topic3_model,topic4_model,topic5_model,
+                     topic6_model,topic7_model,topic_all,AIC_output,
+                     apply.coef= OR,
+                     title="Regression Results",
+                     type="html",
+                     float.env ="sidewaystable",
+                     single.row=FALSE)
+
+```
+
+
+![AIC values](Regression.png)
+
+
+```{r}
+# Compare different models based on AIC (Akaike Information Criteria), lower the AIC better the model
+
+models <- list(topic1_model,topic2_model,topic3_model,topic4_model,topic5_model,
+               topic6_model,topic7_model,topic_all)
+
+model.names<-c('Topic_1','Topic_2','Topic_3','Topic_4','Topic_5','Topic_6','Topic_7','Topic_all')
+
+AIC_output<-aictab(cand.set = models, modnames = model.names)
+
+AIC_output%>%
+kbl(col.names = c("Model_name","Parameters(K)","Information Score(AICc)","Delta AICc",
+                  "Model Likelihood","AICc Weight","Log Likelihood","Cum. Weight")) %>%
+  kable_styling(full_width = T,bootstrap_options = c("striped", "hover", "condensed", 
+                                                     "responsive"),position = "center")
+```
+
+### Interactive Visualisation
+
+Leveraging R's LDAvis package, the following graphs show an interactive visualisation of an intertopic distance map, where area of the circles is proportional to the number of words belonging to the topic. The visualisation takes into account the top 30 terms from each topic which can be adjusted by the relevance metric(lambda). A low lambda signifies the exclusivity of a term.
+
+```{r}
+# Interactive visualisation for topic models
+toLDAvis(
+  tweetfit,
+  docs = out$documents,
+  R = 30,
+  plot.opts = list(xlab = "", ylab = ""),
+  lambda.step = 0.1,
+  out.dir = tempfile(),
+  open.browser = interactive(),
+  as.gist = FALSE,
+  reorder.topics = TRUE
+)
+```
+
+
+
+![Interactive Visualisation of Topics](LDAvis1.png)
+
+<br>
+
+![Exclusive terms for Topic1](LDAvis2.png)
+
+\pagebreak
+
+### Probable Limitations of topic solution
+
+The optimal Kappa selection has been based on the trade-off between coherence and exclusivity which sometimes become debatable and might not produce the best of results. Nevertheless, human judgement plays an important role in making sense of the topics and over interpretation might not always be helpful. 
+Topic Modelling also works more efficiently for longer texts, unlike Tweets which have limited character length.
+
+
+# References
+
+*cbail.github.io. (n.d.). Topic Modeling. [online] Available at: https://cbail.github.io/SICSS_Topic_Modeling.html.*
+
+*Silge, J. (2019). Text Mining with R. [online] Tidytextmining.com. Available at: https://www.tidytextmining.com/ [Accessed 8 Apr. 2022].*
+
+*rdrr.io. (n.d.). toLDAvis: Wrapper to launch LDAvis topic browser. in stm: Estimation of the Structural Topic Model. [online] Available at: https://rdrr.io/cran/stm/man/toLDAvis.html [Accessed 10 Apr. 2022].*
+
